@@ -6,11 +6,20 @@ import time
 import os
 from datetime import datetime
 from tkinter import simpledialog, messagebox
+import subprocess
+import atexit
+
+HD_720 = 1   #Select 1 for 720P and 0 for 480P
+if HD_720 == 1:
+    vid_height, vid_width = 960, 1280
+elif HD_720 == 0:
+    vid_height, vid_width = 480, 640
 
 class WebcamApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Webcam Capture to Video")
+        self.root.geometry("470x550")  # Set the fixed size of the window to 500x500 pixels
 
         self.interval = tk.IntVar(value=1000)  # Default to 1000ms = 1 second
         self.capturing = False
@@ -21,9 +30,13 @@ class WebcamApp:
         self.video_folder = './output_videos/'
         self.start_time = None  # Store the start time of the recording
         self.elapsed_time = 0  # Store the elapsed time
+        self.video_file_path = None  # Store the path of the saved video file
 
         # Create directories if they don't exist
         os.makedirs(self.video_folder, exist_ok=True)
+
+        # Register exit handler to cleanup video file if app closes unexpectedly
+        atexit.register(self.cleanup)
 
         self.setup_gui()
 
@@ -47,13 +60,16 @@ class WebcamApp:
         self.pause_button = tk.Button(self.root, text="Pause", command=self.toggle_pause, state=tk.DISABLED)
         self.pause_button.pack(pady=5)
 
-        # Display label for video feed
-        self.video_label = tk.Label(self.root)
-        self.video_label.pack()
+        # Frame to hold the video label (500x375 size)
+        self.video_frame = tk.Frame(self.root, width=400, height=300)
+        self.video_frame.pack(pady=5)
+        
+        self.video_label = tk.Label(self.video_frame)
+        self.video_label.pack(fill=tk.BOTH, expand=True)
 
-        # Label to show elapsed time
+        # Label to show elapsed time at the bottom
         self.elapsed_time_label = tk.Label(self.root, text="Elapsed Time: 00:00")
-        self.elapsed_time_label.pack(pady=5)
+        self.elapsed_time_label.pack(side=tk.BOTTOM, pady=5)
 
     def select_camera(self):
         camera_id = simpledialog.askinteger("Input", "Enter camera device ID (0 for default, 1 for external, etc.):", minvalue=0)
@@ -78,15 +94,15 @@ class WebcamApp:
 
         self.start_time = time.time()
         timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        video_file_path = os.path.join(self.video_folder, f'video_{timestamp}.mp4')
+        self.video_file_path = os.path.join(self.video_folder, f'video_{timestamp}.mp4')
 
         frame_width = int(self.webcam.get(3))
         frame_height = int(self.webcam.get(4))
 
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 
-        new_width, new_height = 640, 480
-        self.video_file = cv2.VideoWriter(video_file_path, fourcc, self.fps, (new_width, new_height))
+        new_width, new_height = vid_width, vid_height
+        self.video_file = cv2.VideoWriter(self.video_file_path, fourcc, self.fps, (new_width, new_height))
 
         self.capturing = True
         self.paused = False
@@ -101,16 +117,23 @@ class WebcamApp:
             if not self.paused:
                 ret, frame = self.webcam.read()
                 if ret:
-                    frame = cv2.resize((frame), (640, 480))
+                    frame = cv2.resize(frame, (vid_width, vid_height))
 
                     current_time = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
 
                     font = cv2.FONT_HERSHEY_SIMPLEX
-                    cv2.putText(frame, current_time, (10, 30), font, 1, (255, 255, 255), 2, cv2.LINE_AA)
+                    if HD_720 == 1:
+                        cv2.putText(frame, current_time, (30, 50), font, 2, (255, 255, 255), 3, cv2.LINE_AA) 
+                    elif HD_720 == 0:
+                        cv2.putText(frame, current_time, (10, 25), font, 1, (255, 255, 255), 2, cv2.LINE_AA)
+                        
 
                     self.video_file.write(frame)
 
-                    cv2_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    # Resize the frame to fit into the video display area (500x375)
+                    resized_frame = cv2.resize(frame, (400, 300))
+
+                    cv2_image = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
                     img = Image.fromarray(cv2_image)
                     imgtk = ImageTk.PhotoImage(image=img)
                     self.video_label.imgtk = imgtk
@@ -144,20 +167,73 @@ class WebcamApp:
         self.pause_button.config(state=tk.DISABLED)
 
         if self.video_file:
+            # Release the video writer before compressing
             self.video_file.release()
 
-        messagebox.showinfo("Success", "Video capture stopped and saved.")
+            # Get the path of the saved video file (from self.video_file_path)
+            if self.video_file_path:
+                # Define the compressed output file path (e.g., adding "_compressed" to the filename)
+                compressed_video_path = os.path.splitext(self.video_file_path)[0] + "_compressed.mp4"
+
+                # Compress the video using FFmpeg
+                self.compress_video(self.video_file_path, compressed_video_path)
+
+                # After compression, delete the original file
+                os.remove(self.video_file_path)
+
+                messagebox.showinfo("Success", f"Video capture stopped, compressed, and saved to {compressed_video_path}.")
+            else:
+                messagebox.showerror("Error", "No video file was created.")
+
+    def compress_video(self, input_file, output_file, scale_factor=1, crf=23, preset="faster"):
+        try:
+            # Get original video dimensions
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", input_file],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
+            )
+            width, height = map(int, probe.stdout.strip().split(','))
+
+            # Calculate new dimensions while maintaining aspect ratio
+            new_width = int(width * scale_factor)
+            new_height = int(height * scale_factor)
+
+            # Ensure dimensions are divisible by 2 (required by most codecs)
+            new_width -= new_width % 2
+            new_height -= new_height % 2
+
+            # FFmpeg command for compression with scaling
+            command = [
+                "ffmpeg", "-i", input_file,
+                "-vf", f"scale={new_width}:{new_height}",
+                "-vcodec", "libx264", "-crf", str(crf), "-preset", preset,
+                "-acodec", "aac", "-b:a", "128k", "-strict", "experimental",
+                output_file
+            ]
+
+            # Run the command
+            subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print(f"Compressed: {input_file} -> {output_file} (Resolution: {new_width}x{new_height})")
+        except subprocess.CalledProcessError as e:
+            print(f"Error compressing {input_file}: {e}")
+        except Exception as e:
+            print(f"Unexpected error with {input_file}: {e}")
+
+    def cleanup(self):
+        """Ensure the video file is closed properly before exiting."""
+        if self.video_file:
+            self.video_file.release()
+
+        if self.webcam:
+            self.webcam.release()
 
     def close(self):
         self.capturing = False
-        if self.webcam:
-            self.webcam.release()
-        if self.video_file:
-            self.video_file.release()
-        self.root.quit()
+        self.cleanup()
 
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = WebcamApp(root)
-    root.protocol("WM_DELETE_WINDOW", app.close)
-    root.mainloop()
+# Create the main window
+root = tk.Tk()
+app = WebcamApp(root)
+
+# Run the GUI
+root.mainloop()
