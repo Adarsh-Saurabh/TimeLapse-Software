@@ -46,11 +46,11 @@ pip install cx_Freeze Pillow opencv-python
 3. **Prepare Your Project**:
    - Make sure you have your main script (`timelapse.py`) and any other required files (e.g., icons) in the project directory.
 
-4. **Create `setup.py`**:
-   - Use the provided `setup.py` script to configure the build process. Ensure that the script includes the necessary options and paths.
+4. **Create `execute.py`**:
+   - Use the provided `execute.py` script to configure the build process. Ensure that the script includes the necessary options and paths.
 
 5. **Build the Executable**:
-   - Run the `setup.py` script to build the executable:
+   - Run the `execute.py` script to build the executable:
 
      ```bash
      python execute.py build
