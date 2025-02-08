@@ -185,7 +185,7 @@ class WebcamApp:
             else:
                 messagebox.showerror("Error", "No video file was created.")
 
-    def compress_video(self, input_file, output_file, scale_factor=1, crf=23, preset="faster"):
+    def compress_video(self, input_file, output_file, scale_factor=1, crf=23, preset="medium"):
         try:
             # Get original video dimensions
             probe = subprocess.run(

@@ -5,7 +5,7 @@ build_exe_options = {
     'packages': [],
     'excludes': [],
     'include_files': [],
-    'compress': True  # Enable UPX compression
+    # 'compress': True  # Enable UPX compression
 }
 
 setup(
